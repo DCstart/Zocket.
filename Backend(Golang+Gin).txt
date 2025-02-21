@@ -1,0 +1,91 @@
+package main
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+	"net/http"
+	"time"
+)
+
+var jwtKey = []byte("my_secret_key")
+
+type User struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type Task struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	AssignedTo  string `json:"assigned_to"`
+}
+
+var users = make(map[string]string)
+var tasks []Task
+
+func main() {
+	r := gin.Default()
+
+	r.POST("/register", register)
+	r.POST("/login", login)
+	r.GET("/tasks", getTasks)
+	r.POST("/tasks", createTask)
+
+	r.Run(":8080")
+}
+
+func register(c *gin.Context) {
+	var user User
+	if err := c.ShouldBindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	users[user.Username] = string(hashedPassword)
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
+}
+
+func login(c *gin.Context) {
+	var user User
+	if err := c.ShouldBindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hashedPassword, exists := users[user.Username]
+	if !exists || bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(user.Password)) != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"username": user.Username,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(),
+	})
+
+	tokenString, _ := token.SignedString(jwtKey)
+	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+}
+
+func getTasks(c *gin.Context) {
+	c.JSON(http.StatusOK, tasks)
+}
+
+func createTask(c *gin.Context) {
+	var task Task
+	if err := c.ShouldBindJSON(&task); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	task.ID = generateID()
+	tasks = append(tasks, task)
+	c.JSON(http.StatusCreated, task)
+}
+
+func generateID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
